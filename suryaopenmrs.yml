@@ -1,0 +1,193 @@
+- name: Installing Opmrs on Ubuntu
+  hosts: openmrs
+  become: yes
+  tasks:
+    - name: Installing java
+      apt:
+        name: openjdk-8-jdk
+        update_cache: yes
+        state: present
+    - name: Creating mysql group
+      group:
+        name: mysql
+        state: present
+    - name: Creating mysql user
+      user:
+        name: mysql
+        state: present
+    - name: creating test directory
+      file:
+        path: /test
+        state: directory
+    - name: Downloading mysql
+      get_url:
+        url: https://dev.mysql.com/get/Downloads/MySQL-5.6/mysql-5.6.46-linux-glibc2.12-x86_64.tar.gz
+        dest: /test
+    - name: setting ownership to mysql directory
+      file:
+        path: /usr/local/mysql
+        state: directory
+        recurse: yes
+        owner: root
+    - name: Installing unzip
+      apt:
+        name: unzip
+        state: present
+    - name:
+      stat:
+        path: /usr/local/mysql/mysql-5.6.46-linux-glibc2.12-x86_64
+      register: file_mysql
+    - name: unzipping mysql
+      unarchive:
+        src: /test/mysql-5.6.46-linux-glibc2.12-x86_64.tar.gz
+        dest: /usr/local/mysql
+        remote_src: yes
+      when: not file_mysql.stat.exists
+    - name: changing file permissions
+      file:
+        path: /usr/local/mysql/mysql-5.6.46-linux-glibc2.12-x86_64
+        state: directory
+        recurse: yes
+        owner: mysql
+        group: mysql
+    - name: Installing dependencies
+      apt:
+        name: "{{ item }}"
+        update_cache: yes
+        state: present
+      with_items:
+           - libaio1
+           - libncurses5
+           - libnuma-dev
+    - name: executing mysql command
+      command: /mysql_install_db --user=mysql &
+      async: 1800
+      poll: 0
+      args:
+        chdir: /home/ansible/usr/local/mysql/mysql-5.6.46-linux-glibc2.12-x86_64/scripts/
+    - name: setting ownership to mysql directory
+      file:
+        path: /usr/local/mysql/data
+        state: directory
+        recurse: yes
+        owner: mysql
+    - name: copying mysql config. file
+      copy:
+        src: files/my-default.cnf
+        dest: /etc/my.cnf
+    - name: copying mysql service file
+      copy:
+        src: files/mysql.server
+        dest: /etc/init.d/mysql.server
+    - name: Starting mysql service in safe mode
+      command: bin/mysqld_safe --user=mysql &
+      async: 1800
+      poll: 0
+    - name: creating link for mysql binaries
+      file:
+        src: /usr/local/mysql/mysql-5.6.46-linux-glibc2.12-x86_64/bin/mysql
+        dest: /usr/local/bin/mysql
+        state: link
+    - name: reboot the system
+      systemd:
+        daemon_reload: yes
+    - name: start mysql service
+      command: update-rc.d -f mysql.server defaults
+
+    - name: Creating tomcat group
+      group:
+        name: tomcat
+        state: present
+    - name: Creating tomcat user
+      user:
+        name: tomcat
+        shell: /bin/false
+        state: present
+    - name: creating directory /opt/tomcat
+      file:
+        path: /opt/tomcat
+        state: directory
+    - name: downloading tomcat
+      get_url:
+        url: https://archive.apache.org/dist/tomcat/tomcat-7/v7.0.109/bin/apache-tomcat-7.0.109.tar.gz
+        dest: /opt/tomcat
+    - name: untar tomcat
+      unarchive:
+        src: /opt/tomcat/apache-tomcat-7.0.109.tar.gz
+        dest: /opt/tomcat/
+        remote_src: yes
+    - name: providing proper group permissions
+      file:
+        path: /opt/tomcat
+        state: directory
+        recurse: yes
+        group: tomcat
+        owner: tomcat
+    - name: providing proper permissions for conf file
+      file:
+        path: /opt/tomcat/conf
+        state: directory
+        recurse: yes
+        mode: g+r
+    - name: providing proper permissions for conf file
+      file:
+        path: /opt/tomcat/conf
+        state: directory
+        mode: g+x
+    - name: providing proper permissions for directory
+      file:
+        path: "{{ item }}"
+        state: directory
+        recurse: yes
+        owner: tomcat
+      with_items:
+           - webapps
+           - work
+           - temp
+           - logs
+    - name: copying tomcat service file
+      copy:
+        src: files/tomcat.service
+        dest: /etc/systemd/system/tomcat.service
+    - name: reloading system
+      systemd:
+        daemon_reload: yes
+    - name: starting tomcat service
+      service:
+        name: tomcat.service
+        state: started
+
+    - name: creating diretory for OpenMRS
+      file:
+        path: /var/lib/OpenMRS
+        state: directory
+    - name: Setting owner permissions for directory
+      file:
+        path: /var/lib/OpenMRS
+        recurse: yes
+        owner: tomcat
+        group: tomcat
+    - name: creating directory for OpenMRS
+      file:
+        path: /down
+        state: directory
+    - name: Downloading latest version of OpenMRS
+      get_url:
+        url: https://sourceforge.net/projects/openmrs/files/latest/download
+        dest: /down
+    - name: unarchive OpenMRS
+      unarchive:
+        src: /down/openmrs-standalone-2.3.1.zip
+        dest: /down
+        remote_src: yes
+    - name: Copying war file
+      copy:
+        src: /down/openmrs-standalone-2.3.1/tomcat/webapps/openmrs-standalone.war
+        dest: /opt/tomcat/webapps/
+        remote_src: yes
+    - name: Changing ownerships of the OpenMRS.war
+      file:
+        path: /opt/tomcat/webapps/openmrs-standalone.war
+        state: file
+        owner: tomcat
+        group: tomcat
